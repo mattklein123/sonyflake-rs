@@ -1,4 +1,3 @@
-use chrono::prelude::*;
 use std::{
     collections::HashSet,
     sync::{
@@ -9,6 +8,7 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
+use time::OffsetDateTime;
 
 use crate::{
     builder::lower_16_bit_private_ip,
@@ -16,26 +16,35 @@ use crate::{
     sonyflake::{decompose, to_sonyflake_time, Sonyflake, BIT_LEN_SEQUENCE, BIT_LEN_TIME},
 };
 
+fn next_id_with_sleep(sf: &Sonyflake) -> Result<u64, Error> {
+    loop {
+        match sf.next_id(OffsetDateTime::now_utc()) {
+            Ok(id) => return Ok(id),
+            Err(Error::OverSequenceLimit) => {
+                thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(e),
+        }
+    }
+}
+
 #[test]
 fn test_next_id() -> Result<(), BoxDynError> {
     let sf = Sonyflake::new()?;
-    assert!(sf.next_id().is_ok());
+    assert!(sf.next_id(OffsetDateTime::now_utc()).is_ok());
     Ok(())
 }
 
 #[test]
 fn test_once() -> Result<(), BoxDynError> {
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     let sf = Sonyflake::builder().start_time(now).finalize()?;
 
     let sleep_time = 50;
     thread::sleep(Duration::from_millis(10 * sleep_time));
 
-    let id = sf.next_id()?;
+    let id = sf.next_id(OffsetDateTime::now_utc())?;
     let parts = decompose(id);
-
-    let actual_msb = parts.msb;
-    assert_eq!(0, actual_msb, "Unexpected msb");
 
     let actual_time = parts.time;
     if actual_time < sleep_time || actual_time > sleep_time + 1 {
@@ -51,7 +60,7 @@ fn test_once() -> Result<(), BoxDynError> {
 
 #[test]
 fn test_run_for_10s() -> Result<(), BoxDynError> {
-    let now = Utc::now();
+    let now = OffsetDateTime::now_utc();
     let start_time = to_sonyflake_time(now);
     let sf = Sonyflake::builder().start_time(now).finalize()?;
 
@@ -60,10 +69,10 @@ fn test_run_for_10s() -> Result<(), BoxDynError> {
 
     let machine_id = lower_16_bit_private_ip()? as u64;
 
-    let initial = to_sonyflake_time(Utc::now());
-    let mut current = initial.clone();
+    let initial = to_sonyflake_time(OffsetDateTime::now_utc());
+    let mut current = initial;
     while current - initial < 1000 {
-        let id = sf.next_id()?;
+        let id = next_id_with_sleep(&sf)?;
         let parts = decompose(id);
 
         if id <= last_id {
@@ -71,12 +80,7 @@ fn test_run_for_10s() -> Result<(), BoxDynError> {
         }
         last_id = id;
 
-        current = to_sonyflake_time(Utc::now());
-
-        let actual_msb = parts.msb;
-        if actual_msb != 0 {
-            panic!("unexpected msb: {}", actual_msb);
-        }
+        current = to_sonyflake_time(OffsetDateTime::now_utc());
 
         let actual_time = parts.time as i64;
         let overtime = start_time + actual_time - current;
@@ -116,7 +120,9 @@ fn test_threads() -> Result<(), BoxDynError> {
         let thread_tx = tx.clone();
         children.push(thread::spawn(move || {
             for _ in 0..1000 {
-                thread_tx.send(thread_sf.next_id().unwrap()).unwrap();
+                thread_tx
+                    .send(next_id_with_sleep(&thread_sf).unwrap())
+                    .unwrap();
             }
         }));
     }
@@ -140,8 +146,8 @@ fn test_generate_10_ids() -> Result<(), BoxDynError> {
     let sf = Sonyflake::builder().machine_id(&|| Ok(42)).finalize()?;
     let mut ids = vec![];
     for _ in 0..10 {
-        let id = sf.next_id()?;
-        if ids.iter().find(|vec_id| **vec_id == id).is_some() {
+        let id = sf.next_id(OffsetDateTime::now_utc())?;
+        if ids.iter().any(|vec_id| *vec_id == id) {
             panic!("duplicated id: {}", id)
         }
         ids.push(id);
@@ -157,7 +163,7 @@ pub enum TestError {
 
 #[test]
 fn test_builder_errors() {
-    let start_time = Utc::now() + chrono::Duration::seconds(1);
+    let start_time = OffsetDateTime::now_utc() + time::Duration::seconds(1);
     match Sonyflake::builder().start_time(start_time).finalize() {
         Err(Error::StartTimeAheadOfCurrentTime(_)) => {} // ok
         _ => panic!("Expected error on start time ahead of current time"),
@@ -193,6 +199,6 @@ fn test_over_time_limit() -> Result<(), BoxDynError> {
     let mut internals = sf.0.internals.lock().unwrap();
     internals.elapsed_time = 1 << BIT_LEN_TIME;
     drop(internals);
-    assert!(sf.next_id().is_err());
+    assert!(sf.next_id(OffsetDateTime::now_utc()).is_err());
     Ok(())
 }

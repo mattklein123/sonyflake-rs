@@ -1,9 +1,10 @@
-use chrono::prelude::*;
 use pnet::datalink;
 use std::{
     net::{IpAddr, Ipv4Addr},
     sync::{Arc, Mutex},
 };
+use time::macros::datetime;
+use time::OffsetDateTime;
 
 use crate::{
     error::{BoxDynError, Error},
@@ -14,7 +15,7 @@ use crate::{
 ///
 /// [`Sonyflake`]: struct.Sonyflake.html
 pub struct Builder<'a> {
-    start_time: Option<DateTime<Utc>>,
+    start_time: Option<OffsetDateTime>,
     machine_id: Option<&'a dyn Fn() -> Result<u16, BoxDynError>>,
     check_machine_id: Option<&'a dyn Fn(u16) -> bool>,
 }
@@ -39,7 +40,7 @@ impl<'a> Builder<'a> {
 
     /// Sets the start time.
     /// If the time is ahead of current time, finalize will fail.
-    pub fn start_time(mut self, start_time: DateTime<Utc>) -> Self {
+    pub fn start_time(mut self, start_time: OffsetDateTime) -> Self {
         self.start_time = Some(start_time);
         self
     }
@@ -63,13 +64,13 @@ impl<'a> Builder<'a> {
         let sequence = 1 << (BIT_LEN_SEQUENCE - 1);
 
         let start_time = if let Some(start_time) = self.start_time {
-            if start_time > Utc::now() {
+            if start_time > OffsetDateTime::now_utc() {
                 return Err(Error::StartTimeAheadOfCurrentTime(start_time));
             }
 
             to_sonyflake_time(start_time)
         } else {
-            to_sonyflake_time(Utc.with_ymd_and_hms(2014, 9, 1, 0, 0, 0).unwrap())
+            to_sonyflake_time(datetime!(2014-09-01 00:00:00 UTC))
         };
 
         let machine_id = if let Some(machine_id) = self.machine_id {
