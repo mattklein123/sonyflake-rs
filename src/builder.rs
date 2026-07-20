@@ -3,12 +3,14 @@ use std::{
     net::{IpAddr, Ipv4Addr},
     sync::{Arc, Mutex},
 };
-use time::macros::datetime;
 use time::OffsetDateTime;
 
 use crate::{
     error::{BoxDynError, Error},
-    sonyflake::{to_sonyflake_time, Internals, SharedSonyflake, Sonyflake, BIT_LEN_SEQUENCE},
+    sonyflake::{
+        default_start_time, to_sonyflake_time, Internals, SharedSonyflake, Sonyflake,
+        BIT_LEN_SEQUENCE,
+    },
 };
 
 /// A builder to build a [`Sonyflake`] generator.
@@ -70,7 +72,7 @@ impl<'a> Builder<'a> {
 
             to_sonyflake_time(start_time)
         } else {
-            to_sonyflake_time(datetime!(2014-09-01 00:00:00 UTC))
+            to_sonyflake_time(default_start_time())
         };
 
         let machine_id = if let Some(machine_id) = self.machine_id {

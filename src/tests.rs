@@ -8,13 +8,35 @@ use std::{
     time::Duration,
 };
 use thiserror::Error;
-use time::OffsetDateTime;
+use time::{Duration as TimeDuration, OffsetDateTime};
 
 use crate::{
     builder::lower_16_bit_private_ip,
     error::*,
-    sonyflake::{decompose, to_sonyflake_time, Sonyflake, BIT_LEN_SEQUENCE, BIT_LEN_TIME},
+    sonyflake::{
+        decompose, default_start_time, minimum_for_timestamp, to_sonyflake_time, Sonyflake,
+        BIT_LEN_SEQUENCE, BIT_LEN_TIME,
+    },
 };
+
+#[test]
+fn minimum_for_timestamp_covers_all_ids_in_a_time_tick() {
+    let epoch = default_start_time();
+    let first_tick = minimum_for_timestamp(epoch + TimeDuration::milliseconds(10));
+
+    assert_eq!(
+        minimum_for_timestamp(epoch - TimeDuration::milliseconds(1)),
+        0
+    );
+    assert_eq!(minimum_for_timestamp(epoch), 0);
+    assert_eq!(
+        minimum_for_timestamp(epoch + TimeDuration::milliseconds(19)),
+        first_tick
+    );
+    assert_eq!(first_tick, 1 << 25);
+    assert_eq!(first_tick | ((1 << 25) - 1), (2 << 25) - 1);
+    assert!(minimum_for_timestamp(epoch + TimeDuration::milliseconds(20)) > first_tick);
+}
 
 fn next_id_with_sleep(sf: &Sonyflake) -> Result<u64, Error> {
     loop {
